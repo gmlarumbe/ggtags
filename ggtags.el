@@ -2015,11 +2015,43 @@ If SYNC is non-nil, synchronously run CMDS and call CALLBACK."
     (set-process-query-on-exit-flag proc nil)
     (and cutoff (set-process-filter proc filter))
     (set-process-sentinel proc sentinel)
+    (unless (process-live-p proc)
+      (message "gtags process finished before it had to!!"))
+    ;; (when (eq t (process-get proc :callback-done))
+    ;;   (message "Initial callback-done was t!!"))
     (process-put proc :callback-done nil)
     (process-put proc :nlines 0)
-    (if sync (while (not (process-get proc :callback-done))
+    (if sync (while (and (process-live-p proc)
+                         (not (process-get proc :callback-done)))
+               ;; (message "Endless loop!!") ; DANGER: Added for debugging
                (accept-process-output proc 1))
       proc)))
+
+;; TODO: Open PR saying that I had to move to xref because there was a workaround
+;;       with run-with-idle-timer that didn't work properly on slow machines (show workaround).
+;;       Then switched to xref, but this one seems to fail in very fast machines (the opposite case),
+;;       because for some reason the process seems to finish before the sentinel can catch
+;;       any change and therefore run the callback, staying in the endless loop and hanging Emacs.
+;;
+;; TODO: Remove code from previous function
+;; TODO: Rewrite the docstring
+;; TODO: What to do with cutoff, called with value `ggtags--xref-limit' = 1000 (default)
+(defun ggtags-global-output-sync (buffer cmds callback &optional cutoff)
+  "Asynchronously pipe the output of running CMDS to BUFFER.
+When finished invoke CALLBACK in BUFFER with process exit status.
+If SYNC is non-nil, synchronously run CMDS and call CALLBACK."
+  (or buffer (error "Output buffer required"))
+  (when (get-buffer-process (get-buffer buffer))
+    ;; Notice running multiple processes in the same buffer so that we
+    ;; can fix the caller. See for example `ggtags-eldoc-function'.
+    (message "Warning: detected %S already running in %S; interrupting..."
+             (get-buffer-process buffer) buffer)
+    (interrupt-process (get-buffer-process buffer)))
+  (let* ((program (car cmds))
+         (args (cdr cmds))
+         (status (apply #'call-process program nil buffer nil args)))
+    (with-current-buffer buffer
+      (funcall callback status))))
 
 (cl-defun ggtags-fontify-code (code &optional (mode major-mode))
   (cl-check-type mode function)
@@ -2451,12 +2483,12 @@ Return the list of xrefs for TAG."
             (kill-buffer (current-buffer)))))
     (ggtags-with-current-project
       (let ((default-directory (ggtags-current-project-root)))
-        (ggtags-global-output
+        (ggtags-global-output-sync
          (get-buffer-create " *ggtags-xref*")
          (append
           (split-string (ggtags-global-build-command cmd))
           (list "--" (shell-quote-argument tag)))
-         collect ggtags--xref-limit 'sync))
+         collect ggtags--xref-limit))
       xrefs)))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql ggtags)) tag)
