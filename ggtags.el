@@ -1992,7 +1992,6 @@ When finished invoke CALLBACK in BUFFER with process exit status."
                                            (with-current-buffer buffer
                                              (line-number-at-pos (point-max)))
                                          0))))
-         (proc (apply #'start-file-process program buffer program args))
          (filter (lambda (proc string)
                    (and (buffer-live-p (process-buffer proc))
                         (with-current-buffer (process-buffer proc)
@@ -2008,36 +2007,15 @@ When finished invoke CALLBACK in BUFFER with process exit status."
                      (when (memq (process-status proc) '(exit signal))
                        (with-current-buffer (process-buffer proc)
                          (set-process-buffer proc nil)
-                         (unwind-protect
-                             (funcall callback (process-exit-status proc))
-                           (process-put proc :callback-done t)))))))
+                         (funcall callback (process-exit-status proc))))))
+         (proc (apply #'start-file-process program buffer program args)))
+    (set-process-sentinel proc sentinel)
     (set-process-query-on-exit-flag proc nil)
     (and cutoff (set-process-filter proc filter))
-    (set-process-sentinel proc sentinel)
-    (process-put proc :callback-done nil)
-    (process-put proc :nlines 0)))
-
-(defun ggtags-global-output-sync (buffer cmds callback &optional cutoff)
-  "Synchronously run CMDS and show output in BUFFER.
-When finished invoke CALLBACK in BUFFER with process exit status."
-  ;; Same as `ggtags-global-output'
-  (or buffer (error "Output buffer required"))
-  (when (get-buffer-process (get-buffer buffer))
-    ;; Notice running multiple processes in the same buffer so that we
-    ;; can fix the caller. See for example `ggtags-eldoc-function'.
-    (message "Warning: detected %S already running in %S; interrupting..."
-             (get-buffer-process buffer) buffer)
-    (interrupt-process (get-buffer-process buffer)))
-  (let* ((program (car cmds))
-         (args (cdr cmds))
-         (status (apply #'call-process program nil buffer nil args)))
-    (with-current-buffer buffer
-      (save-excursion
-        (goto-char (point-min))
-        (forward-line (1+ cutoff))
-        (unless (eobp)
-          (kill-region (point) (point-max))))
-      (funcall callback status))))
+    (process-put proc :nlines 0)
+    (while (and sync (process-live-p proc))
+      (accept-process-output proc 1))
+    proc))
 
 (cl-defun ggtags-fontify-code (code &optional (mode major-mode))
   (cl-check-type mode function)
