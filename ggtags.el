@@ -1976,7 +1976,7 @@ ggtags: history match invalid, jump to first match instead")
     (and buffer-file-name ggtags-update-on-save
          (ggtags-update-tags-single buffer-file-name 'nowait))))
 
-(defun ggtags-global-output (buffer cmds callback &optional cutoff)
+(defun ggtags-global-output (buffer cmds callback &optional cutoff sync)
   "Asynchronously pipe the output of running CMDS to BUFFER.
 When finished invoke CALLBACK in BUFFER with process exit status."
   (or buffer (error "Output buffer required"))
@@ -2447,12 +2447,12 @@ Return the list of xrefs for TAG."
             (kill-buffer (current-buffer)))))
     (ggtags-with-current-project
       (let ((default-directory (ggtags-current-project-root)))
-        (ggtags-global-output-sync
+        (ggtags-global-output
          (get-buffer-create " *ggtags-xref*")
          (append
           (split-string (ggtags-global-build-command cmd))
           (list "--" (shell-quote-argument tag)))
-         collect ggtags--xref-limit))
+         collect ggtags--xref-limit 'sync))
       xrefs)))
 
 (cl-defmethod xref-backend-definitions ((_backend (eql ggtags)) tag)
